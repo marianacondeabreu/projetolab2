@@ -1,0 +1,814 @@
+---
+title: "Projeto2"
+output:
+  pdf_document: default
+  html_document: default
+date: "2025-11-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Projeto 2
+```{r}
+rm(list=ls())
+```
+
+
+#1. Data Generation
+
+Number of individuals: 100 + a random number between 1 and 20.
+Number of biomarkers: 15 + a random number between 1 and 3.
+```{r}
+set.seed(123)  # fixa a seed para reprodutibilidade
+
+n_ind <- 100 + sample(1:20, 1)   # número de indivíduos
+n_bio <- 15 + sample(1:3, 1)        # número de biomarcadores
+
+n_ind; n_bio
+```
+
+Values must be simulated from chosen distributions (Normal, Log-normal, Uniform, Gamma, etc.), with proper justification.
+```{r}
+# Função que gera um biomarcador de uma distribuição aleatória
+gera_biomarcador <- function(n) {
+  dist_type <- sample(c("norm", "lnorm", "unif", "gamma"), 1)
+  if (dist_type == "norm") {
+    rnorm(n, mean = 50, sd = 10)
+  } else if (dist_type == "lnorm") {
+    rlnorm(n, meanlog = 3, sdlog = 0.5)
+  } else if (dist_type == "unif") {
+    runif(n, min = 0, max = 100)
+  } else {
+    rgamma(n, shape = 5, scale = 2)
+  }
+}
+
+# Gerar todos os biomarcadores automaticamente
+dados <- replicate(n_bio, gera_biomarcador(n_ind))
+dados <- as.data.frame(dados)
+
+# Dar nomes às colunas
+colnames(dados) <- paste0("bio", 1:n_bio)
+```
+
+
+A proportion between 5% and 10% of missing values (NA) must be introduced randomly.
+```{r}
+set.seed(123)  # garante reprodutibilidade
+
+# Proporção aleatória entre 5% e 10%
+prop_na <- runif(1, 0.05, 0.10)
+
+# Número total de valores no dataset
+total_vals <- nrow(dados) * ncol(dados)
+
+# Número de valores a transformar em NA
+n_na <- floor(prop_na * total_vals)
+
+# Escolher posições aleatórias
+na_positions <- sample(total_vals, n_na)
+
+# Converter índice linear em coordenadas (linha, coluna)
+row_idx <- ((na_positions - 1) %% nrow(dados)) + 1
+col_idx <- ((na_positions - 1) %/% nrow(dados)) + 1
+
+# Introduzir os NAs
+for (k in seq_along(na_positions)) {
+  dados[row_idx[k], col_idx[k]] <- NA
+}
+
+# Verificar proporção real de NAs
+mean(is.na(dados))
+
+# Verificar os dados
+dados
+```
+
+
+These generated data must be stored in a file and later read to be used in the following tasks.
+```{r}
+library(writexl)
+
+# Gravar em Excel
+write_xlsx(dados, "projeto_dados.xlsx")
+
+```
+
+
+#2. Base Function with Loops
+
+Euclidean Distance entre dois vetores usando ciclos for
+```{r}
+euclidean_distance_base <- function(ind_i, ind_j) {
+ x_i <- as.numeric(ind_i)
+x_j <- as.numeric(ind_j)
+ soma <- 0
+
+ # O loop itera sobre todos os biomarcadores
+ for (k in seq_along(x_i)) {
+ if (!is.na(x_i[k]) && !is.na(x_j[k])) {
+ soma <- soma + (x_i[k] - x_j[k])^2
+}
+}
+ 
+# Calcula a raiz quadrada diretamente e garante o escalar
+return(as.numeric(sqrt(soma)))
+}
+
+```
+
+
+```{r}
+# Exemplo: calcular distância entre indivíduo 1 e 2
+ind1 <- dados[1, ]
+ind2 <- dados[2, ]
+
+euclidean_distance_base(ind1, ind2)
+```
+
+
+```{r}
+# Criar a matriz com a distâncias entre todos os pares de indivíduos
+
+# Dimensão da matriz
+n_ind <- nrow(dados)
+
+# Criar matriz quadrada n × n
+mat_dist <- matrix(0, nrow = n_ind, ncol = n_ind)
+
+# Preencher com loops (matriz completa)
+for (i in 1:n_ind) {
+ # CORREÇÃO 1: Extração segura para garantir vetor numérico
+ind_i <- unlist(dados[i, ])
+ for (j in 1:n_ind) {
+ind_j <- unlist(dados[j, ])
+ 
+ # CORREÇÃO 2: Nome da função consistente
+ mat_dist[i, j] <- euclidean_distance_base(ind_i, ind_j)
+ }
+}
+
+# Visualizar parte da matriz
+mat_dist[1:5, 1:5]
+```
+
+
+Pearson Correlation
+```{r}
+pearson_correlation <- function(ind_i, ind_j) {
+  
+  x_i <- as.numeric(ind_i)
+  x_j <- as.numeric(ind_j)
+  
+  # Identificar onde ambos têm valores não-NA
+  valid_indices <- !is.na(x_i) & !is.na(x_j)
+  
+  # Filtrar os vetores para usar apenas os dados válidos para o par (i, j)
+  x_i_valid <- x_i[valid_indices]
+  x_j_valid <- x_j[valid_indices]
+  
+  p_valid <- length(x_i_valid) # Novo número de biomarcadores
+  
+  # Se não houver dados em comum
+  if (p_valid < 2) { # Mínimo de 2 pontos
+    return(NA) 
+  }
+  
+  #Calcular as Médias
+  sum_i <- 0
+  sum_j <- 0
+  for (k in 1:p_valid) {
+    sum_i <- sum_i + x_i_valid[k]
+    sum_j <- sum_j + x_j_valid[k]
+  }
+  mean_i <- sum_i / p_valid
+  mean_j <- sum_j / p_valid
+  
+  # Calcular Numerador e Denominadores com loops
+  
+  num <- 0   
+  den_i <- 0 # denominador para ind_i
+  den_j <- 0 # denominador para ind_j
+  
+  for (k in 1:p_valid) {
+    # Diferença da média
+    diff_i <- x_i_valid[k] - mean_i
+    diff_j <- x_j_valid[k] - mean_j
+    
+    # Acumular componentes
+    num   <- num   + (diff_i * diff_j)
+    den_i <- den_i + (diff_i)^2
+    den_j <- den_j + (diff_j)^2
+  }
+  
+  #Calcular a Correlação
+  
+  # Evitar divisão por zero (
+  if (den_i == 0 || den_j == 0) {
+    corr <- NA
+  } else {
+    corr <- num / sqrt(den_i * den_j)
+  }
+
+  return(corr)
+}
+```
+
+Matriz de correlação
+```{r}
+
+# Matriz de correlação
+n_ind <- nrow(dados)
+
+# Criar matriz quadrada n × n. 
+mat_corr <- matrix(NA, nrow = n_ind, ncol = n_ind) 
+
+# Preencher com loops 
+for (i in 1:n_ind) {
+  # CORREÇÃO: Extração segura para garantir vetor numérico
+  ind_i <- unlist(dados[i, ]) 
+  for (j in 1:n_ind) {
+    # CORREÇÃO: Extração segura para garantir vetor numérico
+    ind_j <- unlist(dados[j, ]) 
+    
+    if (i == j) {
+      mat_corr[i, j] <- 1
+    } else {
+      # Assumindo que a função pearson_correlation já foi corrigida para usar '_base'
+      mat_corr[i, j] <- pearson_correlation(ind_i, ind_j)
+    }
+  }
+}
+
+# Adicionar nomes de linhas/colunas 
+rownames(mat_corr) <- paste0("Ind", 1:n_ind)
+colnames(mat_corr) <- paste0("Ind", 1:n_ind)
+
+# Ver parte da matriz
+mat_corr[1:5, 1:5]
+```
+
+Mean of Absolute Differences
+```{r}
+mean_abs_diff <- function(ind_i, ind_j) {
+  ind_i <- as.numeric(ind_i)
+  ind_j <- as.numeric(ind_j)
+  
+  p <- length(ind_i)
+  soma <- 0
+  count <- 0
+  
+  # loop explícito
+  for (k in 1:p) {
+    if (!is.na(ind_i[k]) && !is.na(ind_j[k])) {
+      soma <- soma + abs(ind_i[k] - ind_j[k])
+      count <- count + 1
+    }
+  }
+  
+  # média das diferenças absolutas
+  if (count == 0) {
+  mad <- NA # 
+} else {
+  mad <- soma / count
+}
+return(mad)
+}
+
+```
+
+
+Matriz da Média das Diferenças Absolutas (MAD)
+```{r}
+n_ind <- nrow(dados)
+
+# Criar matriz quadrada n × n
+mat_mad <- matrix(NA, nrow = n_ind, ncol = n_ind) # Usar NA é mais robusto
+
+# Preencher com loops
+for (i in 1:n_ind) {
+  # CORREÇÃO 1: Extração segura (unlist()) para garantir vetor
+  ind_i <- unlist(dados[i, ]) 
+  for (j in 1:n_ind) {
+    # CORREÇÃO 1: Extração segura (unlist())
+    ind_j <- unlist(dados[j, ]) 
+    
+    # CORREÇÃO 2: Diagonal principal deve ser 0
+    if (i == j) {
+      mat_mad[i, j] <- 0
+    } else {
+      # Chamada à função
+      mat_mad[i, j] <- mean_abs_diff(ind_i, ind_j)
+    }
+  }
+}
+
+# Ver parte da matriz
+mat_mad[1:5, 1:5]
+```
+
+Count Above Threshold
+```{r}
+count_above_threshold <- function(ind_i, ind_j) {
+  ind_i <- as.numeric(ind_i); ind_j <- as.numeric(ind_j)
+  threshold <- (mean(ind_i, na.rm = TRUE) + mean(ind_j, na.rm = TRUE)) / 2
+  count <- 0
+  for (k in seq_along(ind_i)) {
+    if (!is.na(ind_i[k]) && !is.na(ind_j[k])) {
+      if (ind_i[k] > threshold && ind_j[k] > threshold) {
+        count <- count + 1
+      }
+    }
+  }
+  return(count)
+}
+```
+
+
+Matriz de Contagem Acima do Limiar (CAT)
+```{r}
+n_ind <- nrow(dados)
+
+# Criar matriz quadrada n × n
+mat_cat <- matrix(NA, nrow = n_ind, ncol = n_ind) 
+
+# Preencher com loops
+for (i in 1:n_ind) {
+  # Extração segura (garantir que ind_i é um vetor)
+  ind_i <- unlist(dados[i, ]) 
+  
+  for (j in 1:n_ind) {
+    # Extração segura (garantir que ind_j é um vetor)
+    ind_j <- unlist(dados[j, ]) 
+    
+    if (i == j) {
+      mat_cat[i, j] <- 0
+    } else {
+      # Chamada à função corrigida (sem caracteres invisíveis)
+      mat_cat[i, j] <- count_above_threshold(ind_i, ind_j)
+    }
+  }
+}
+
+# Ver parte da matriz
+mat_cat[1:5, 1:5]
+```
+
+Composite Index
+```{r}
+composite_index_base <- function(ind_i, ind_j) {
+  # 1. Chamar as funções auxiliares (Módulos)
+  d_euclid <- euclidean_distance_base(ind_i, ind_j)
+  corr     <- pearson_correlation(ind_i, ind_j)
+  mad      <- mean_abs_diff(ind_i, ind_j)
+  cat_val  <- count_above_threshold(ind_i, ind_j)
+  
+  # 2. Aplicar a fórmula CORRIGIDA
+  numerador <- d_euclid + abs(corr) + mad
+  denominador <- cat_val + 1
+  
+  # 3. Tratamento de NA e Retorno
+  if (is.na(numerador)) {
+    return(NA)
+  } else {
+    return(as.numeric(numerador / denominador))
+  }
+}
+```
+
+
+```{r}
+# Número de indivíduos
+n_ind <- nrow(dados)
+
+# Criar a matriz de similaridade final S (ou Index_ij)
+S_base <- matrix(NA, nrow = n_ind, ncol = n_ind)
+
+# Preencher com loops
+for (i in 1:n_ind) {
+  # 1. Extração segura para garantir que ind_i é um vetor
+  ind_i <- unlist(dados[i, ]) 
+  
+  for (j in 1:n_ind) {
+    # 1. Extração segura para garantir que ind_j é um vetor
+    ind_j <- unlist(dados[j, ]) 
+
+    if (i == j) {
+      S_base[i, j] <- 0
+    } else {
+      # Chamada à função composta (Usando o nome correto que definimos)
+      # Nota: Se usou 'composite_index' no seu código, troque 'composite_index_core' 
+      # pelo seu nome
+      S_base[i, j] <- as.numeric(composite_index_base(ind_i, ind_j)) 
+    }
+  }
+}
+
+# Ver parte da matriz
+print(S_base[1:5, 1:5])
+```
+
+#3. Vectorization of the Function
+
+Euclidean Distance
+```{r}
+# Matriz de distâncias Euclidianas vetorizada
+mat_dist2 <- as.matrix(dist(dados, method = "euclidean"))
+```
+O R já tem a função dist(), que calcula diretamente a matriz de distâncias entre todas as linhas de um dataset.
+
+
+Pearson Correlation
+```{r}
+# Matriz de correlações de Pearson entre indivíduos
+mat_corr2 <- cor(t(dados), use = "pairwise.complete.obs")
+```
+O R tem a função cor(), que devolve a matriz de correlação entre colunas ou linhas.
+
+
+Mean of Absolute Differences
+```{r}
+# Função vetorizada para MAD
+mad_matrix <- function(X) {
+  n <- nrow(X)
+  M <- matrix(0, n, n)
+  for (i in 1:n) {
+    diffs <- abs(sweep(X, 2, X[i, ], "-"))
+    M[i, ] <- rowMeans(diffs, na.rm = TRUE)
+  }
+  return(M)
+}
+
+mat_mad2 <- mad_matrix(as.matrix(dados))
+```
+
+
+Count Above Threshold
+```{r}
+
+# Função vetorizada para calcular a contagem acima do threshold entre dois indivíduos
+count_above_threshold_vec <- function(ind_i, ind_j) {
+  ind_i <- as.numeric(ind_i)
+  ind_j <- as.numeric(ind_j)
+  
+  # Threshold = média das médias (com exclusão de NAs)
+  threshold <- (mean(ind_i, na.rm = TRUE) + mean(ind_j, na.rm = TRUE)) / 2
+  
+  # Selecionar apenas posições válidas (sem NA em ambos)
+  valid <- !is.na(ind_i) & !is.na(ind_j)
+  
+  # Contagem vetorizada: ambos > threshold
+  sum(ind_i[valid] > threshold & ind_j[valid] > threshold)
+}
+
+# Função para construir a matriz completa com outer()
+count_above_threshold_outer <- function(X) {
+  n <- nrow(X)
+  
+  # Função auxiliar que chama a versão vetorizada para dois indivíduos
+  pair_count <- function(i, j) {
+    count_above_threshold_vec(X[i, ], X[j, ])
+  }
+  
+  # Aplicar a todos os pares com outer
+  M <- outer(1:n, 1:n, Vectorize(pair_count))
+  
+  # Garantir simetria
+  M[lower.tri(M)] <- t(M)[lower.tri(M)]
+  
+  return(M)
+}
+
+# Exemplo de uso com os teus dados
+mat_cat2 <- count_above_threshold_outer(as.matrix(dados))
+
+```
+
+
+Composite Index
+```{r}
+composite_matrix_correct <- function(X) {
+  # Garantir que X é matriz
+  X <- as.matrix(X)
+  
+  # 1. Cálculo das Métricas (Vectorizadas)
+  mat_euclid <- as.matrix(dist(X, method = "euclidean"))
+  mat_corr   <- cor(t(X), use = "pairwise.complete.obs")
+  mat_mad    <- mad_matrix(X) 
+  mat_cat    <- count_above_threshold_outer(X) 
+  
+  #Formula
+  numerador_S2 <- mat_euclid + abs(mat_corr) + mat_mad
+  denominador_S2 <- mat_cat + 1
+  
+  # Índice Composto S2
+  S2 <- numerador_S2 / denominador_S2
+  
+  # Ajustar a diagonal principal para 0 
+  diag(S2) <- 0
+  
+  return(S2)
+}
+
+S2 <- composite_matrix_correct(dados)
+```
+
+
+Comparação de tempos
+```{r}
+library(microbenchmark)
+library(dplyr)
+library(knitr)
+
+# Benchmark de cada fórmula (par indivíduo 1 vs 2 para simplificar)
+bench_results <- microbenchmark(
+  euclidean_loops = euclidean_distance_base(dados[1, ], dados[2, ]),
+  euclidean_vectorized = mat_dist2[1, 2],
+  
+  pearson_loops = pearson_correlation(dados[1, ], dados[2, ]),
+  pearson_vectorized = mat_corr2[1, 2],
+  
+  mad_loops = mean_abs_diff(dados[1, ], dados[2, ]),
+  mad_vectorized = mat_mad2[1, 2],
+  
+  count_loops = count_above_threshold(dados[1, ], dados[2, ]),
+  count_vectorized = mat_cat2[1, 2],
+  
+  composite_loops = composite_index_base(dados[1, ], dados[2, ]),
+  composite_vectorized = S2[1, 2],
+  
+  times = 10
+)
+
+# Resumo em tabela (milissegundos)
+summary_table <- bench_results %>%
+  as.data.frame() %>%
+  group_by(expr) %>%
+  summarise(
+    mean_time = mean(time) / 1e6,   # converter para ms
+    median_time = median(time) / 1e6,
+    min_time = min(time) / 1e6,
+    max_time = max(time) / 1e6
+  )
+
+# Mostrar tabela formatada
+kable(summary_table, digits = 3, caption = "Comparação de tempos (ms) por fórmula")
+
+
+```
+
+
+
+
+#4. Modular Programming
+
+Euclidean Distance
+```{r}
+euclidean_distance2 <- function(ind_i, ind_j) {
+  ind_i <- as.numeric(ind_i); ind_j <- as.numeric(ind_j)
+  soma <- 0
+  for (k in seq_along(ind_i)) {
+    if (!is.na(ind_i[k]) && !is.na(ind_j[k])) {
+      soma <- soma + (ind_i[k] - ind_j[k])^2
+    }
+  }
+  sqrt(soma)
+}
+```
+
+
+Pearson Correlation
+```{r}
+pearson_correlation2_CORRECT <- function(ind_i, ind_j) {
+  x_i <- as.numeric(ind_i); x_j <- as.numeric(ind_j)
+  
+  valid_indices <- !is.na(x_i) & !is.na(x_j)
+  x_i_valid <- x_i[valid_indices]
+  x_j_valid <- x_j[valid_indices]
+  p_valid <- length(x_i_valid)
+  
+  if (p_valid < 2) { return(NA) }
+  
+  # 2. CALCULAR médias
+  mean_i <- sum(x_i_valid) / p_valid
+  mean_j <- sum(x_j_valid) / p_valid
+  
+  #Formula
+  num <- 0; den_i <- 0; den_j <- 0
+  for (k in 1:p_valid) {
+    diff_i <- x_i_valid[k] - mean_i
+    diff_j <- x_j_valid[k] - mean_j
+    
+    num   <- num   + (diff_i * diff_j)
+    den_i <- den_i + (diff_i)^2
+    den_j <- den_j + (diff_j)^2
+  }
+  
+  if (den_i == 0 || den_j == 0) { return(NA) }
+  return(num / sqrt(den_i * den_j))
+}
+```
+
+
+Mean Absolute Differences
+```{r}
+mean_abs_diff2_CORRECT <- function(ind_i, ind_j) {
+  ind_i <- as.numeric(ind_i); ind_j <- as.numeric(ind_j)
+  soma <- 0; count <- 0
+  
+  for (k in seq_along(ind_i)) {
+    if (!is.na(ind_i[k]) && !is.na(ind_j[k])) {
+      soma <- soma + abs(ind_i[k] - ind_j[k])
+      count <- count + 1
+    }
+  }
+  
+  #Robustez
+  if (count == 0) {
+    return(NA) 
+  } else {
+    return(soma / count)
+  }
+}
+```
+
+
+Count Above Threshold
+```{r}
+count_above_threshold2_CORRECT <- function(ind_i, ind_j) {
+  x_i <- as.numeric(ind_i); x_j <- as.numeric(ind_j)
+  
+  # Exclusão Pairwise
+  valid_indices <- !is.na(x_i) & !is.na(x_j)
+  x_i_valid <- x_i[valid_indices]
+  x_j_valid <- x_j[valid_indices]
+  
+  if (length(x_i_valid) == 0) { return(NA) }
+  
+  # 2. calculae THRESHOLD_ij 
+  Threshold_ij <- median(c(x_i_valid, x_j_valid))
+  
+  count <- 0
+  
+  # 3. Loop
+  for (k in seq_along(x_i_valid)) {
+    if (x_i_valid[k] > Threshold_ij && x_j_valid[k] > Threshold_ij) {
+      count <- count + 1
+    }
+  }
+  return(count)
+}
+```
+
+
+Composite Index
+```{r}
+composite_index2_CORRECT <- function(ind_i, ind_j) {
+  # Assegurar que as funções auxiliares são chamadas
+  d_euclid <- euclidean_distance2(ind_i, ind_j) 
+  corr     <- pearson_correlation2(ind_i, ind_j) 
+  mad      <- mean_abs_diff2(ind_i, ind_j) 
+  cat_val  <- count_above_threshold2(ind_i, ind_j) 
+  
+  # Implementação da fórmula 
+  numerador <- d_euclid + abs(corr) + mad
+  denominador <- cat_val + 1
+  
+  # Tratamento de NAs
+  if (is.na(numerador)) {
+    return(NA)
+  } else {
+    return(numerador / denominador)
+  }
+}
+
+```
+
+```{r}
+build_matrix <- function(data, index_fun, ...) {
+  n <- nrow(data)
+  M <- matrix(0, n, n)
+  for (i in 1:n) {
+    ind_i <- as.numeric(data[i, ])
+    for (j in 1:n) {
+      ind_j <- as.numeric(data[j, ])
+      M[i, j] <- index_fun(ind_i, ind_j, ...)
+    }
+  }
+  M
+}
+
+# Exemplo: matriz do Composite Index
+S3 <- build_matrix(dados,composite_index_base)
+
+```
+
+
+#5. Visualization of the Results
+
+Heatmap da matriz de similaridade
+```{r}
+library(ggplot2)
+library(reshape2)
+
+# Converter matriz S para formato longo
+S_long <- melt(S3)
+
+# Heatmap com gradiente de várias cores
+ggplot(S_long, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradientn(colors = c("white", "skyblue", "darkblue")) +
+  labs(title = "Heatmap da Matriz de Similaridade (Composite Index)",
+       x = "Indivíduo i", y = "Indivíduo j", fill = "Índice") +
+  theme_minimal()
+
+```
+
+A visualization of the distributions of the indicators
+```{r}
+
+
+# 1. Extrair valores únicos da parte superior das matrizes
+euclid_vals<- mat_dist2[upper.tri(mat_dist2)] # Usar mat_dist2
+corr_vals<- mat_corr2[upper.tri(mat_corr2)] # Usar mat_corr2
+mad_vals<- mat_mad2[upper.tri(mat_mad2)]   # Usar mat_mad2
+cat_vals<- mat_cat2[upper.tri(mat_cat2)]   # Usar mat_cat2
+comp_vals<- S2[upper.tri(S2)]               # Usar S2 (Índice Composto Vetorizado)
+
+# Criar data frame longo
+library(reshape2)
+df_indicadores <- data.frame(
+Euclidean = euclid_vals,
+Pearson= corr_vals,
+MAD= mad_vals,
+CAT= cat_vals,
+Composite = comp_vals
+)
+df_long <- melt(df_indicadores, na.rm = TRUE) # Adicionado na.rm=TRUE para Boxplots/Densidade
+```
+
+Histograms
+```{r}
+library(ggplot2)
+
+ggplot(df_long, aes(x = value, fill = variable)) +
+  geom_histogram(alpha = 0.6, bins = 30, position = "identity") +
+  facet_wrap(~variable, scales = "free") +
+  labs(title = "Distribuições dos Indicadores",
+       x = "Valor", y = "Frequência") +
+  theme_minimal()
+
+```
+
+Density Plot
+```{r}
+ggplot(df_long, aes(x = value, color = variable, fill = variable)) +
+  geom_density(alpha = 0.4) +
+  facet_wrap(~variable, scales = "free") +
+  labs(title = "Densidade dos Indicadores",
+       x = "Valor", y = "Densidade") +
+  theme_minimal()
+
+```
+
+Boxplot
+```{r}
+ggplot(df_long, aes(x = variable, y = value, fill = variable)) +
+  geom_boxplot(alpha = 0.7) +
+  labs(title = "Boxplots dos Indicadores",
+       x = "Indicador", y = "Valor") +
+  theme_minimal()
+```
+
+#6 Comparison and Performance Analysis
+```{r}
+library(microbenchmark)
+
+# 1. Pré-cálculo das Matrizes (Para usar nas funções all.equal)
+# Usa as funções que definimos no código completo.
+
+S_loops <- build_matrix(dados, composite_index_base) 
+S2 <- composite_matrix_correct(as.matrix(dados)) 
+S_modular <- build_matrix(dados, composite_index_base) 
+# Nota: S_loops e S_modular usam o mesmo core de loops, então S_loops ≈ S_modular
+
+# 2. Benchmark dos Tempos
+# Os nomes nas chamadas DEVEM coincidir com as definições das funções.
+comparacao_tempos <- microbenchmark(
+  V0_Loops_Base      = build_matrix(dados, composite_index_base),
+  V1_Modular         = build_matrix(dados, composite_index_base),
+  V2_Vectorizada     = composite_matrix_correct(as.matrix(dados)),
+  times = 10
+)
+print(comparacao_tempos)
+
+# 3. Comparação da Precisão
+all.equal(S_loops, S2)
+all.equal(S_loops, S_modular)
+```
+
+
+
+
